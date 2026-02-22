@@ -21,10 +21,13 @@ pub struct ParseResult {
 ///
 /// 1. Preprocess: rewrite `|>`, `::`, `F<_>` to standard TS at text level.
 /// 2. Parse: feed the preprocessed text to the standard SWC parser.
+///
+/// If `tsx` is `None`, TSX mode is inferred from the filename extension.
 pub fn parse_sugarcube(
     source: &str,
     filename: &str,
     syntax: &ScSyntax,
+    tsx: Option<bool>,
 ) -> Result<ParseResult> {
     let preprocessed = preprocess::preprocess(source, syntax);
 
@@ -38,7 +41,7 @@ pub fn parse_sugarcube(
 
     let handler = Handler::with_emitter_writer(Box::new(std::io::stderr()), Some(source_map.clone()));
 
-    let is_tsx = filename.ends_with(".tsx");
+    let is_tsx = tsx.unwrap_or_else(|| filename.ends_with(".tsx"));
     let ts_syntax = Syntax::Typescript(TsSyntax {
         tsx: is_tsx,
         decorators: true,

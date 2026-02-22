@@ -1,0 +1,2 @@
+interface BiFunctor<F, G> {
+}

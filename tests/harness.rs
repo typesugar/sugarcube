@@ -62,7 +62,7 @@ fn walkdir(dir: &Path) -> Vec<PathBuf> {
 
 fn run_pipeline(source: &str, filename: &str) -> Result<String> {
     let syntax = ScSyntax::default();
-    let parsed = parse_sugarcube(source, filename, &syntax)?;
+    let parsed = parse_sugarcube(source, filename, &syntax, None)?;
     let module = desugar_module(parsed.module);
 
     let mut buf = Vec::new();
@@ -87,7 +87,7 @@ fn verify_valid_typescript(output: &str, filename: &str) -> Result<()> {
         cons: false,
         hkt: false,
     };
-    parse_sugarcube(output, filename, &syntax)?;
+    parse_sugarcube(output, filename, &syntax, None)?;
     Ok(())
 }
 

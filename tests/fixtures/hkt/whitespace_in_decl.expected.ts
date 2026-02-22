@@ -1,0 +1,2 @@
+interface Functor<F> {
+}

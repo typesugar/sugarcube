@@ -3,6 +3,8 @@
 //! Finds `F<_>` declarations in type parameter lists, strips `<_>`, and
 //! rewrites usages of `F<A>` to `$<F, A>` within the declaring scope.
 
+use super::util::{char_offset_to_byte, skip_non_code, HandleResult, TemplateState};
+
 #[derive(Debug, Clone)]
 struct HktDecl {
     name: String,
@@ -43,8 +45,18 @@ pub fn rewrite_hkt(source: &str) -> String {
 fn find_hkt_declarations(chars: &[char], source: &str) -> Vec<HktDecl> {
     let mut decls = Vec::new();
     let mut i = 0;
+    let mut template_state = TemplateState::new();
 
     while i < chars.len() {
+        // Handle template literals (process code in interpolations, skip literal parts)
+        match template_state.handle_char(chars, i) {
+            HandleResult::Skip(n) => {
+                i += n;
+                continue;
+            }
+            HandleResult::Process => {}
+        }
+
         // Skip strings and comments.
         if let Some(skip) = skip_non_code(chars, i) {
             i = skip;
@@ -65,7 +77,7 @@ fn find_hkt_declarations(chars: &[char], source: &str) -> Vec<HktDecl> {
             }
 
             if i < chars.len() && chars[i] == '<' {
-                let angle_byte_start = char_offset_to_byte(chars, i, source);
+                let angle_byte_start = char_offset_to_byte(chars, i);
                 i += 1;
 
                 // Skip whitespace
@@ -107,7 +119,7 @@ fn find_hkt_declarations(chars: &[char], source: &str) -> Vec<HktDecl> {
 
                     if all_underscores && i < chars.len() && chars[i] == '>' {
                         i += 1;
-                        let angle_byte_end = char_offset_to_byte(chars, i, source);
+                        let angle_byte_end = char_offset_to_byte(chars, i);
 
                         let scope = find_enclosing_scope(chars, ident_start, source);
 
@@ -131,11 +143,21 @@ fn find_hkt_declarations(chars: &[char], source: &str) -> Vec<HktDecl> {
     decls
 }
 
-fn find_hkt_usages(chars: &[char], source: &str, decls: &[HktDecl]) -> Vec<HktUsage> {
+fn find_hkt_usages(chars: &[char], _source: &str, decls: &[HktDecl]) -> Vec<HktUsage> {
     let mut usages = Vec::new();
     let mut i = 0;
+    let mut template_state = TemplateState::new();
 
     while i < chars.len() {
+        // Handle template literals (process code in interpolations, skip literal parts)
+        match template_state.handle_char(chars, i) {
+            HandleResult::Skip(n) => {
+                i += n;
+                continue;
+            }
+            HandleResult::Process => {}
+        }
+
         if let Some(skip) = skip_non_code(chars, i) {
             i = skip;
             continue;
@@ -143,7 +165,7 @@ fn find_hkt_usages(chars: &[char], source: &str, decls: &[HktDecl]) -> Vec<HktUs
 
         if chars[i].is_ascii_uppercase() {
             let ident_start = i;
-            let ident_byte_start = char_offset_to_byte(chars, i, source);
+            let ident_byte_start = char_offset_to_byte(chars, i);
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 i += 1;
             }
@@ -171,7 +193,7 @@ fn find_hkt_usages(chars: &[char], source: &str, decls: &[HktDecl]) -> Vec<HktUs
                     }
 
                     let usage_byte_start = ident_byte_start;
-                    let usage_byte_end = char_offset_to_byte(chars, close + 1, source);
+                    let usage_byte_end = char_offset_to_byte(chars, close + 1);
 
                     // Check if this usage is within any HKT declaration's scope
                     if find_active_decl(decls, &name, usage_byte_start).is_some() {
@@ -255,14 +277,25 @@ fn find_enclosing_scope(chars: &[char], pos: usize, source: &str) -> (usize, usi
             break;
         }
     }
-    let scope_start = char_offset_to_byte(chars, scope_start_char, source);
+    let scope_start = char_offset_to_byte(chars, scope_start_char);
 
     // Scan forward from the declaration to find the end of the scope.
     // Look for the matching closing `}` or `;` at depth 0.
     let mut scope_end = source.len();
     let mut depth = 0;
     let mut j = pos;
+    let mut template_state = TemplateState::new();
+
     while j < chars.len() {
+        // Handle template literals
+        match template_state.handle_char(chars, j) {
+            HandleResult::Skip(n) => {
+                j += n;
+                continue;
+            }
+            HandleResult::Process => {}
+        }
+
         if let Some(skip) = skip_non_code(chars, j) {
             j = skip;
             continue;
@@ -271,13 +304,13 @@ fn find_enclosing_scope(chars: &[char], pos: usize, source: &str) -> (usize, usi
             '{' => depth += 1,
             '}' => {
                 if depth <= 1 {
-                    scope_end = char_offset_to_byte(chars, j + 1, source);
+                    scope_end = char_offset_to_byte(chars, j + 1);
                     break;
                 }
                 depth -= 1;
             }
             ';' if depth == 0 => {
-                scope_end = char_offset_to_byte(chars, j + 1, source);
+                scope_end = char_offset_to_byte(chars, j + 1);
                 break;
             }
             _ => {}
@@ -307,64 +340,6 @@ fn find_matching_angle(chars: &[char], start: usize) -> Option<usize> {
         i += 1;
     }
     None
-}
-
-fn skip_non_code(chars: &[char], i: usize) -> Option<usize> {
-    if i >= chars.len() {
-        return Some(chars.len());
-    }
-
-    // Single-line comment
-    if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
-        let mut j = i + 2;
-        while j < chars.len() && chars[j] != '\n' {
-            j += 1;
-        }
-        return Some(j + 1);
-    }
-
-    // Multi-line comment
-    if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
-        let mut j = i + 2;
-        while j + 1 < chars.len() {
-            if chars[j] == '*' && chars[j + 1] == '/' {
-                return Some(j + 2);
-            }
-            j += 1;
-        }
-        return Some(chars.len());
-    }
-
-    // String literals
-    if chars[i] == '"' || chars[i] == '\'' {
-        let quote = chars[i];
-        let mut j = i + 1;
-        while j < chars.len() && chars[j] != quote {
-            if chars[j] == '\\' {
-                j += 1;
-            }
-            j += 1;
-        }
-        return Some(j + 1);
-    }
-
-    // Template literal (simplified — doesn't handle nested expressions)
-    if chars[i] == '`' {
-        let mut j = i + 1;
-        while j < chars.len() && chars[j] != '`' {
-            if chars[j] == '\\' {
-                j += 1;
-            }
-            j += 1;
-        }
-        return Some(j + 1);
-    }
-
-    None
-}
-
-fn char_offset_to_byte(chars: &[char], char_idx: usize, _source: &str) -> usize {
-    chars[..char_idx].iter().map(|c| c.len_utf8()).sum()
 }
 
 #[cfg(test)]

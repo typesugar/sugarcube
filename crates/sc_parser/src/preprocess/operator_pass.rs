@@ -6,6 +6,8 @@
 
 use sc_ast::ScSyntax;
 
+use super::util::char_offset_to_byte;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Op {
     Pipeline,
@@ -93,8 +95,69 @@ fn find_operator_occurrences(source: &str, syntax: &ScSyntax) -> Vec<OpOccurrenc
     let mut in_type_alias = false;
     let mut in_interface = false;
 
+    // Template literal state: stack where each entry is the brace depth in the current interpolation.
+    // Empty = not in a template literal
+    // Entry 0 = in the literal part (between ` and ${ or between } and ${ or `)
+    // Entry > 0 = inside an interpolation with that brace depth
+    let mut template_stack: Vec<i32> = Vec::new();
+
     while i < chars.len() {
-        // Skip strings, comments, template literals
+        // Handle template literal state first
+        if !template_stack.is_empty() {
+            let depth = *template_stack.last().unwrap();
+            if depth == 0 {
+                // In literal part - skip until ${ or closing `
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 2;
+                    continue;
+                }
+                if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                    // Start of interpolation
+                    *template_stack.last_mut().unwrap() = 1;
+                    i += 2;
+                    continue;
+                }
+                if chars[i] == '`' {
+                    // End of this template literal
+                    template_stack.pop();
+                    i += 1;
+                    continue;
+                }
+                // Skip literal character
+                i += 1;
+                continue;
+            }
+            // In interpolation - track braces but process code normally
+            // Note: `{` increments depth, `}` decrements, nested `` ` `` handled below
+        }
+
+        // Check for template literal start (either not in one, or inside an interpolation)
+        if chars[i] == '`' {
+            template_stack.push(0); // Start in literal part
+            i += 1;
+            continue;
+        }
+
+        // Track braces when inside a template interpolation
+        if !template_stack.is_empty() {
+            let depth = template_stack.last_mut().unwrap();
+            if *depth > 0 {
+                match chars[i] {
+                    '{' => *depth += 1,
+                    '}' => {
+                        *depth -= 1;
+                        if *depth == 0 {
+                            // End of interpolation, back to literal part
+                            i += 1;
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Skip strings, comments (but NOT template literals - handled above)
         if let Some(skip) = skip_non_code(&chars, i) {
             i = skip;
             continue;
@@ -387,7 +450,14 @@ fn skip_non_code(chars: &[char], i: usize) -> Option<usize> {
         return Some(chars.len());
     }
 
-    // String literals
+    // Regex literal - must check before treating `/` as division
+    if chars[i] == '/' && is_regex_context(chars, i) {
+        if let Some(end) = scan_regex_literal(chars, i) {
+            return Some(end);
+        }
+    }
+
+    // String literals (NOT template literals - those are handled by template_stack in the main loop)
     if chars[i] == '"' || chars[i] == '\'' {
         let quote = chars[i];
         let mut j = i + 1;
@@ -400,18 +470,126 @@ fn skip_non_code(chars: &[char], i: usize) -> Option<usize> {
         return Some(if j < chars.len() { j + 1 } else { j });
     }
 
-    // Template literal (simplified)
-    if chars[i] == '`' {
-        let mut j = i + 1;
-        while j < chars.len() && chars[j] != '`' {
-            if chars[j] == '\\' {
-                j += 1;
-            }
-            j += 1;
-        }
-        return Some(if j < chars.len() { j + 1 } else { j });
+    None
+}
+
+/// Determine if `/` at position `i` starts a regex literal based on preceding context.
+/// A `/` starts a regex when it appears where an expression is expected (not after an operand).
+fn is_regex_context(chars: &[char], i: usize) -> bool {
+    // Find the last non-whitespace character/token before position i
+    let mut j = i;
+    while j > 0 && chars[j - 1].is_whitespace() {
+        j -= 1;
     }
 
+    if j == 0 {
+        // Start of input - regex context
+        return true;
+    }
+
+    let prev = chars[j - 1];
+
+    // After these characters, `/` starts a regex (expression expected)
+    if matches!(
+        prev,
+        '(' | '[' | '{' | ',' | ';' | ':' | '=' | '!' | '&' | '|' | '?' | '+' | '-' | '*' | '%'
+            | '^' | '~' | '<' | '>'
+    ) {
+        return true;
+    }
+
+    // Check for keywords that precede expressions
+    // We need to look back to see if we're after a keyword like `return`, `case`, etc.
+    if prev.is_alphabetic() || prev == '_' || prev == '$' {
+        // Scan backwards to get the full word
+        let mut word_start = j - 1;
+        while word_start > 0
+            && (chars[word_start - 1].is_alphanumeric()
+                || chars[word_start - 1] == '_'
+                || chars[word_start - 1] == '$')
+        {
+            word_start -= 1;
+        }
+        let word: String = chars[word_start..j].iter().collect();
+
+        // Keywords after which `/` starts a regex
+        return matches!(
+            word.as_str(),
+            "return"
+                | "case"
+                | "throw"
+                | "in"
+                | "of"
+                | "typeof"
+                | "void"
+                | "delete"
+                | "new"
+                | "else"
+                | "do"
+                | "instanceof"
+                | "yield"
+                | "await"
+        );
+    }
+
+    // After `)`, `]`, `}`, identifier, number, string - it's division
+    // (prev would be alphanumeric or one of these closing brackets)
+    false
+}
+
+/// Scan a regex literal starting at position `i`, returning the position after the closing `/` and flags.
+/// Returns None if this doesn't look like a valid regex literal.
+fn scan_regex_literal(chars: &[char], i: usize) -> Option<usize> {
+    if i >= chars.len() || chars[i] != '/' {
+        return None;
+    }
+
+    let mut j = i + 1;
+
+    // Scan the regex body - look for closing `/` (not escaped, not in character class)
+    let mut in_char_class = false;
+
+    while j < chars.len() {
+        let c = chars[j];
+
+        // Regex literals cannot span unescaped newlines
+        if c == '\n' || c == '\r' {
+            return None;
+        }
+
+        // Handle escape sequences
+        if c == '\\' && j + 1 < chars.len() {
+            j += 2;
+            continue;
+        }
+
+        // Handle character classes
+        if c == '[' && !in_char_class {
+            in_char_class = true;
+            j += 1;
+            continue;
+        }
+        if c == ']' && in_char_class {
+            in_char_class = false;
+            j += 1;
+            continue;
+        }
+
+        // Found the closing `/` (not inside character class)
+        if c == '/' && !in_char_class {
+            j += 1;
+            // Scan optional flags: g, i, m, s, u, y, d, v
+            while j < chars.len() && matches!(chars[j], 'g' | 'i' | 'm' | 's' | 'u' | 'y' | 'd' | 'v')
+            {
+                j += 1;
+            }
+            return Some(j);
+        }
+
+        j += 1;
+    }
+
+    // No closing `/` found
     None
 }
 
@@ -431,10 +609,6 @@ fn scan_word(chars: &[char], start: usize) -> usize {
         i += 1;
     }
     i
-}
-
-fn char_offset_to_byte(chars: &[char], char_idx: usize) -> usize {
-    chars[..char_idx].iter().map(|c| c.len_utf8()).sum()
 }
 
 #[cfg(test)]
@@ -494,6 +668,99 @@ mod tests {
         assert_eq!(
             output,
             r#"const x = __binop__(__binop__(a, "::", b), "|>", f);"#
+        );
+    }
+
+    #[test]
+    fn regex_pipe_not_rewritten() {
+        let input = "const pattern = /foo|bar/g;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn regex_in_call_not_rewritten() {
+        let input = "const result = input.match(/a|b|c/);";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn regex_with_pipeline() {
+        let input = "const x = text.match(/a|b/) |> f;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, r#"const x = __binop__(text.match(/a|b/), "|>", f);"#);
+    }
+
+    #[test]
+    fn regex_as_pipeline_operand() {
+        let input = "const x = /foo|bar/.test(s) |> Boolean;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(
+            output,
+            r#"const x = __binop__(/foo|bar/.test(s), "|>", Boolean);"#
+        );
+    }
+
+    #[test]
+    fn regex_after_return() {
+        let input = "return /a|b/;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn regex_with_char_class() {
+        let input = "const r = /[a|b]/;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn regex_with_escaped_slash() {
+        let input = r"const r = /a\/b|c/;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn template_literal_pipeline_in_interpolation() {
+        let input = "const msg = `Result: ${data |> f}`;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, r#"const msg = `Result: ${__binop__(data, "|>", f)}`;"#);
+    }
+
+    #[test]
+    fn template_literal_literal_part_unchanged() {
+        let input = "const msg = `plain |> text`;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn template_literal_nested() {
+        let input = "const msg = `outer ${`inner ${x |> f}`}`;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(output, r#"const msg = `outer ${`inner ${__binop__(x, "|>", f)}`}`;"#);
+    }
+
+    #[test]
+    fn template_literal_multiple_interpolations() {
+        let input = "const msg = `a ${a |> fa} b ${b |> fb}`;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(
+            output,
+            r#"const msg = `a ${__binop__(a, "|>", fa)} b ${__binop__(b, "|>", fb)}`;"#
+        );
+    }
+
+    #[test]
+    fn template_literal_cons_in_interpolation() {
+        let input = "const list = `Items: ${1 :: 2 :: []}`;";
+        let output = rewrite_operators(input, &syntax_all());
+        assert_eq!(
+            output,
+            r#"const list = `Items: ${__binop__(1, "::", __binop__(2, "::", []))}`;"#
         );
     }
 }

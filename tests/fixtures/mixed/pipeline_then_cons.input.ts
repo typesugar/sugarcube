@@ -1,0 +1,1 @@
+head |> (x => x :: tail);

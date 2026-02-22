@@ -1,0 +1,1 @@
+interface Functor< F < _ > > {}

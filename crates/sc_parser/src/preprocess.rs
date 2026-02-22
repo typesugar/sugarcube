@@ -11,6 +11,7 @@ use sc_ast::ScSyntax;
 
 mod hkt_pass;
 mod operator_pass;
+mod util;
 
 /// Preprocess a sugarcube source string, rewriting custom syntax to standard TS.
 pub fn preprocess(source: &str, syntax: &ScSyntax) -> String {
