@@ -22,7 +22,7 @@ pub enum ScToken {
 }
 
 /// A token with its source span.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ScTokenAndSpan {
     pub token: ScToken,
     pub span: Span,

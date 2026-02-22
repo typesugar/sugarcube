@@ -44,7 +44,7 @@ pub struct ScBinExpr {
 ///
 /// During desugaring, references like `F<A>` within the declaring scope
 /// are rewritten to `$<F, A>`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HktTypeParam {
     pub span: Span,
     pub name: String,

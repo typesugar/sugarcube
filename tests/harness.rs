@@ -150,7 +150,13 @@ fn golden_file_tests() {
             continue;
         }
 
-        let expected = std::fs::read_to_string(&expected_path).unwrap();
+        let expected = match std::fs::read_to_string(&expected_path) {
+            Ok(s) => s,
+            Err(e) => {
+                failures.push(format!("{test_name}: failed to read expected: {e}"));
+                continue;
+            }
+        };
         if actual.trim() != expected.trim() {
             failures.push(format!(
                 "{test_name}: output mismatch\n--- expected ---\n{}\n--- actual ---\n{}",

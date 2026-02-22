@@ -234,7 +234,7 @@ fn select_next_operator(occurrences: &[OpOccurrence]) -> &OpOccurrence {
                 b.byte_start.cmp(&a.byte_start)
             }
         })
-        .unwrap()
+        .expect("select_next_operator called with empty occurrences")
 }
 
 fn find_left_operand(source: &str, op_start: usize, op: Op) -> usize {

@@ -4,7 +4,6 @@
 //! In type references within scope: `F<A>` → `$<F, A>`.
 
 use std::collections::HashSet;
-use swc_common::Span;
 use swc_ecma_visit::{VisitMut, VisitMutWith};
 
 /// Visitor that rewrites `F<A>` to `$<F, A>` for names in `hkt_names`.
@@ -49,7 +48,7 @@ impl VisitMut for HktRewriter {
                 swc_ecma_ast::Ident::new_no_ctxt("$".into(), span),
             );
             node.type_params = Some(Box::new(swc_ecma_ast::TsTypeParamInstantiation {
-                span: Span::default(),
+                span: type_params.span,
                 params: new_params,
             }));
         }
