@@ -1,0 +1,13 @@
+[package]
+name = "sc_desugar"
+description = "AST-to-AST transform that desugars sugarcube syntax to standard TypeScript"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sc_ast = { workspace = true }
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_visit.workspace = true

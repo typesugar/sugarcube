@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sc_ast",
+    "crates/sc_lexer",
+    "crates/sc_parser",
+    "crates/sc_desugar",
+    "crates/sc_cli",
+    "crates/sc_test",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/typesugar/sugarcube"
+
+# Pin upstream SWC versions so all crates use the same release.
+# To update: bump these versions, then follow docs/rebasing-upstream.md.
+[workspace.dependencies]
+swc_common = { version = "18", features = ["sourcemap"] }
+swc_ecma_ast = { version = "20", features = ["serde-impl"] }
+swc_ecma_codegen = "23"
+swc_ecma_parser = "33"
+swc_ecma_visit = "20"
+
+sc_ast = { path = "crates/sc_ast" }
+sc_lexer = { path = "crates/sc_lexer" }
+sc_parser = { path = "crates/sc_parser" }
+sc_desugar = { path = "crates/sc_desugar" }
+
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

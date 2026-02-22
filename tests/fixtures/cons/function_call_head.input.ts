@@ -1,0 +1,1 @@
+const list = getValue() :: rest;

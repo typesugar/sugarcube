@@ -1,0 +1,22 @@
+[package]
+name = "sc_cli"
+description = "sugarcube CLI (sc) — parse TypeScript with extended syntax and emit standard TS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sc"
+path = "src/main.rs"
+
+[dependencies]
+sc_ast = { workspace = true }
+sc_parser = { workspace = true }
+sc_desugar = { workspace = true }
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_codegen.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true

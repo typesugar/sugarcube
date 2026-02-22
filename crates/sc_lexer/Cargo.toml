@@ -1,0 +1,13 @@
+[package]
+name = "sc_lexer"
+description = "Extended ECMAScript/TypeScript lexer that recognises sugarcube tokens (|>, ::)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sc_ast = { workspace = true }
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_parser.workspace = true

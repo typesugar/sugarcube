@@ -1,0 +1,12 @@
+[package]
+name = "sc_ast"
+description = "Extended ECMAScript/TypeScript AST with sugarcube syntax nodes (HKT, pipeline, cons)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+serde.workspace = true

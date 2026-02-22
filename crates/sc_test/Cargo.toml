@@ -1,0 +1,21 @@
+[package]
+name = "sc_test"
+description = "Test harness for sugarcube golden-file and roundtrip tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sc_ast = { workspace = true }
+sc_parser = { workspace = true }
+sc_desugar = { workspace = true }
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_codegen.workspace = true
+anyhow.workspace = true
+
+[[test]]
+name = "golden"
+path = "../../tests/harness.rs"
